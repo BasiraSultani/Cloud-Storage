@@ -1,0 +1,21 @@
+{
+    "name": "abdul/cloud-storage",
+    "autoload": {
+        "psr-4": {
+            "Abdul\\CloudStorage\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "AbdulAhmad",
+            "email": "abdulahmad.matin@gmail.com"
+        }
+    ],
+    "require": {
+        "google/cloud-storage": "^1.41",
+        "google/cloud-monitoring": "^1.10",
+        "league/oauth2-client": "^2.7",
+        "guzzlehttp/guzzle": "^7.8",
+        "microsoft/microsoft-graph": "*"
+    }
+}
