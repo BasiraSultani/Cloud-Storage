@@ -255,6 +255,10 @@ class CLOUS_MT_STORAGE_API
 		<div class="wrap">
 			<h1>Cloud Storage Settings</h1>
 			<p>Select a service to configure API settings:</p>
+			<ul>
+				<li><a href="admin.php?page=google-storage">Google Storage</a></li>
+				<li><a href="admin.php?page=onedrive-storage">OneDrive Storage</a></li>
+			</ul>
 		</div>
 		<?php
 	}
