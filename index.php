@@ -78,15 +78,10 @@ class CLOUS_MT_STORAGE_API
 			'google_storage_settings_section'
 		);
 
-		/* fields for one drive storage
-							 $clientId = 'your-client-id';
-							 $clientSecret = 'your-client-secret';
-							 $clientTenant = 'your-tenantid';
-							 $redirectUri = 'your-redirect-uri';
-							 */
 		register_setting('onedrive-storage', 'onedrive_client_id');
 		register_setting('onedrive-storage', 'onedrive_client_secret');
 		register_setting('onedrive-storage', 'onedrive_tenant_id');
+		register_setting('onedrive-storage', 'onedrive_drive_id');
 		register_setting('onedrive-storage', 'onedrive_redirect_uri');
 
 		add_settings_section(
@@ -118,6 +113,14 @@ class CLOUS_MT_STORAGE_API
 			'onedrive_tenant_id',     // Field ID
 			'Tenant ID',                     // Field title
 			array($this, 'onedrive_tenant_id_field_callback'), // Callback for rendering the field
+			'onedrive-storage',                 // Page on which to add the field
+			'onedrive_storage_settings_section'  // Section to which the field belongs
+		);
+
+		add_settings_field(
+			'onedrive_drive_id',     // Field ID
+			'Drive ID',                     // Field title
+			array($this, 'onedrive_drive_id_field_callback'), // Callback for rendering the field
 			'onedrive-storage',                 // Page on which to add the field
 			'onedrive_storage_settings_section'  // Section to which the field belongs
 		);
@@ -196,6 +199,13 @@ class CLOUS_MT_STORAGE_API
 	{
 		$option = get_option('onedrive_tenant_id');
 		echo '<input type="text" name="onedrive_tenant_id" value="' . esc_attr($option) . '" />';
+	}
+
+	// Callback for the OneDrive Drive ID settings field
+	public function onedrive_drive_id_field_callback()
+	{
+		$option = get_option('onedrive_drive_id');
+		echo '<input type="text" name="onedrive_drive_id" value="' . esc_attr($option) . '" />';
 	}
 
 	// Callback for the OneDrive Redirect URI settings field
@@ -297,7 +307,6 @@ class CLOUS_MT_STORAGE_API
 			?></p>
 			<form method="POST" action="options.php" enctype="multipart/form-data">
 				<?php
-				echo do_shortcode('[onedrive_storage_space]');
 				settings_fields('onedrive-storage');
 				do_settings_sections('onedrive-storage');
 				submit_button('Save Settings');
@@ -445,97 +454,169 @@ class CLOUS_MT_STORAGE_API
 
 	public function onedrive_storage_recent_files()
 	{
-		// Fetch client id and secret from your options or configuration.
+		// Load the required settings from options or a configuration
 		$clientId = get_option('onedrive_client_id');
 		$clientSecret = get_option('onedrive_client_secret');
-		$urlAccessToken = 'https://login.microsoftonline.com/36fe8e16-d57b-4e38-b456-fe8561e3b046/oauth2/v2.0/token';
+		$tenantId = get_option('onedrive_tenant_id');
+		$drive_id = get_option('onedrive_drive_id');
 
 		$provider = new GenericProvider([
 			'clientId' => $clientId,
 			'clientSecret' => $clientSecret,
-			'urlAuthorize' => null,
-			'urlAccessToken' => $urlAccessToken,
-			'urlResourceOwnerDetails' => null,
+			// The redirect URI is not used in the client credentials flow.
+			'redirectUri' => 'http://your-redirect-uri/',
+			'urlAuthorize' => 'https://login.microsoftonline.com/' . $tenantId . '/oauth2/v2.0/authorize',
+			'urlAccessToken' => 'https://login.microsoftonline.com/' . $tenantId . '/oauth2/v2.0/token',
+			'urlResourceOwnerDetails' => ''
 		]);
 
+
 		try {
+			// Try to get an access token using the client credentials grant
 			$accessToken = $provider->getAccessToken('client_credentials', [
 				'scope' => 'https://graph.microsoft.com/.default'
 			]);
 
-			// Initialize Guzzle HTTP client.
-			$graphClient = new Client();
+			// Create a new client instance
+			$client = new Client();
 
-			// Replace 'YOUR_DRIVE_ID' with the actual drive id.
-			$response = $graphClient->request('GET', 'https://graph.microsoft.com/v1.0/drives/YOUR_DRIVE_ID/root/children', [
+			$uri = 'https://graph.microsoft.com/v1.0/drives/' . $drive_id . '/root/children';
+			$response = $client->request('GET', $uri, [
 				'headers' => [
-					'Authorization' => 'Bearer ' . $accessToken->getToken(),
-					'Content-Type' => 'application/json',
-					'Accept' => 'application/json',
+					'Authorization' => 'Bearer ' . $accessToken->getToken()
 				]
 			]);
 
-			$body = $response->getBody();
-			$files = json_decode($body, true);
+			// Decode the response body
+			$body = json_decode($response->getBody(), true);
 
-			// Display the data.
-			foreach ($files['value'] as $file) {
-				echo "Name: " . htmlspecialchars($file['name']) . "<br />\n";
+			$html = '<ul>';
+			//show file icon if it was file and show folder icon if it was folder show name and extension
+			foreach ($body['value'] as $item) {
+				$isFolder = $item['folder'] !== null;
+				$objectName = $item['name'];
+				$objectSize = $item['size'];
+				$objectUpdated = $item['lastModifiedDateTime'];
+				//change the size to GB or MB
+				$size = $objectSize;
+				if ($size >= 1073741824) {
+					$objectSize = number_format($size / 1073741824, 2) . ' GB';
+				} elseif ($size >= 1048576) {
+					$objectSize = number_format($size / 1048576, 2) . ' MB';
+				} elseif ($size >= 1024) {
+					$objectSize = number_format($size / 1024, 2) . ' KB';
+				} elseif ($size > 1) {
+					$objectSize = $size . ' bytes';
+				} elseif ($size == 1) {
+					$objectSize = $size . ' byte';
+				} else {
+					$objectSize = '0 bytes';
+				}
+
+				$html .= '<li>';
+				if ($isFolder) {
+					$iconUrl = plugins_url('cloud-storage/images/folder.png');
+				} else {
+					$iconUrl = plugins_url('cloud-storage/images/file.png');
+				}
+				$html .= '<img style="height: 80px" src="' . $iconUrl . '" alt="' . ($isFolder ? 'Folder' : 'File') . '" />';
+				$html .= '<p>' . $objectName . '</p>';
+				$html .= '<p>' . $objectSize . '</p>';
+				$html .= '<p>' . $objectUpdated . '</p>';
+				// file extension
+				if (!$isFolder) {
+					$ext = pathinfo($objectName, PATHINFO_EXTENSION);
+					$html .= '<span class="extension">' . $ext . '</span>';
+				}
+				$html .= '</li>';
 			}
+			$html .= '</ul>';
+
+			return $html;
+		} catch (GuzzleException $e) {
+			// Handle errors from Guzzle
+			echo 'Error: ' . $e->getMessage();
 		} catch (\League\OAuth2\Client\Provider\Exception\IdentityProviderException $e) {
-			error_log($e->getMessage());
-			echo 'Error obtaining access token.';
-		} catch (\GuzzleHttp\Exception\GuzzleException $e) {
-			error_log($e->getMessage());
-			echo 'Error making request to Graph API.';
+			// Failed to get the access token
+			echo 'Error: ' . $e->getMessage();
+		} catch (\Exception $e) {
+			// Catch any other exceptions
+			echo 'Error: ' . $e->getMessage();
 		}
 	}
 
+	//get onedrive used space and available space
 	public function onedrive_storage_space()
 	{
-		// OneDrive recent files shortcode implementation
+		// Load the required settings from options or a configuration
 		$clientId = get_option('onedrive_client_id');
 		$clientSecret = get_option('onedrive_client_secret');
-		$redirectUri = get_option('onedrive_redirect_uri');
 		$tenantId = get_option('onedrive_tenant_id');
+		$drive_id = get_option('onedrive_drive_id');
+		$provider = new GenericProvider([
+			'clientId' => $clientId,
+			'clientSecret' => $clientSecret,
+			// The redirect URI is not used in the client credentials flow.
+			'redirectUri' => 'http://your-redirect-uri/',
+			'urlAuthorize' => 'https://login.microsoftonline.com/' . $tenantId . '/oauth2/v2.0/authorize',
+			'urlAccessToken' => 'https://login.microsoftonline.com/' . $tenantId . '/oauth2/v2.0/token',
+			'urlResourceOwnerDetails' => ''
+		]);
 
-		// $provider = new GenericProvider([
-		// 	'clientId' => $clientId,
-		// 	'clientSecret' => $clientSecret,
-		// 	'urlAuthorize' => null,
-		// 	'urlAccessToken' => "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token",
-		// 	'urlResourceOwnerDetails' => null,
-		// ]);
+		try {
+			// Try to get an access token using the client credentials grant
+			$accessToken = $provider->getAccessToken('client_credentials', [
+				'scope' => 'https://graph.microsoft.com/.default'
+			]);
 
-		// try {
-		// 	$accessToken = $provider->getAccessToken('client_credentials', [
-		// 		'scope' => 'https://graph.microsoft.com/.default'
-		// 	]);
+			// Create a new client instance
+			$client = new Client();
 
-		// 	$graphClient = new Client();
+			$uri = 'https://graph.microsoft.com/v1.0/drives/' . $drive_id;
+			$response = $client->request('GET', $uri, [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $accessToken->getToken()
+				]
+			]);
 
-		// 	$response = $graphClient->request('GET', 'https://graph.microsoft.com/v1.0/me/drive', [
-		// 		'headers' => [
-		// 			'Authorization' => 'Bearer ' . $accessToken->getToken(),
-		// 			'Content-Type' => 'application/json',
-		// 			'Accept' => 'application/json',
-		// 		]
-		// 	]);
+			// Decode the response body
+			$body = json_decode($response->getBody(), true);
 
-		// 	$body = $response->getBody();
-		// 	$drive = json_decode($body, true);
+			// Output the used and available space
+			$usedSpace = $body['used'];
+			$totalSpace = $body['quota']['total'];
+			$availableSpace = $totalSpace - $usedSpace;
 
-		// 	// Display the data.
-		// 	echo "Drive ID: " . htmlspecialchars($drive['id']) . "<br />\n";
-		// 	echo "Drive Type: " . htmlspecialchars($drive['driveType']) . "<br />\n";
-		// 	echo "Drive Owner: " . htmlspecialchars($drive['owner']['user']['displayName']) . "<br />\n";
-		// } catch (\League\OAuth2\Client\Provider\Exception\IdentityProviderException $e) {
-		// 	error_log($e->getMessage());
-		// 	echo 'Error obtaining access token.';
-		// } catch (\GuzzleHttp\Exception\GuzzleException $e) {
-		// 	error_log($e->getMessage());
-		// 	echo 'Error making request to Graph API.';
-		// }
+			// change the size to GB or MB
+			if ($usedSpace >= 1073741824) {
+				$usedSpace = number_format($usedSpace / 1073741824, 2) . ' GB';
+			} elseif ($usedSpace >= 1048576) {
+				$usedSpace = number_format($usedSpace / 1048576, 2) . ' MB';
+			} elseif ($usedSpace >= 1024) {
+				$usedSpace = number_format($usedSpace / 1024, 2) . ' KB';
+			} elseif ($usedSpace > 1) {
+				$usedSpace = $usedSpace . ' bytes';
+			} elseif ($usedSpace == 1) {
+				$usedSpace = $usedSpace . ' byte';
+			} else {
+				$usedSpace = '0 bytes';
+			}
+
+			$html = '<p>Used space: ' . $usedSpace . ' bytes</p>';
+			$html .= '<p>Available space: ' . $availableSpace . ' bytes</p>';
+
+			return $html;
+
+		} catch (GuzzleException $e) {
+			// Handle errors from Guzzle
+			echo 'Error: ' . $e->getMessage();
+		} catch (\League\OAuth2\Client\Provider\Exception\IdentityProviderException $e) {
+			// Failed to get the access token
+			echo 'Error: ' . $e->getMessage();
+		} catch (\Exception $e) {
+			// Catch any other exceptions
+			echo 'Error: ' . $e->getMessage();
+		}
 	}
 }
 
